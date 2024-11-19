@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Mesh-Up</string>
+    <string name="ssid">ssid</string>
+    <string name="level">level</string>
+    <string name="send">Send</string>
+    <string name="holder_s_name">Holder\'s Name</string>
+    <string name="device_ip">Device IP</string>
+    <string name="chat">Chat</string>
+    <string name="service_running">Service Running</string>
+    <string name="service_suspended">Service Suspended</string>
+</resources>

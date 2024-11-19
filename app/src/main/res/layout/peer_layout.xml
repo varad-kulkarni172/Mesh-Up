@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" >
+
+    <TextView
+        android:id="@+id/holderName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="15dp"
+        android:layout_marginTop="15dp"
+        android:text="@string/holder_s_name" />
+
+    <TextView
+        android:id="@+id/deviceIP"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignStart="@+id/holderName"
+        android:layout_below="@+id/holderName"
+        android:text="@string/device_ip" />
+
+    <Button
+        android:id="@+id/chatButton"
+        android:layout_width="120dp"
+        android:layout_height="50dp"
+        android:layout_alignTop="@+id/holderName"
+        android:layout_alignBottom="@+id/deviceIP"
+        android:layout_marginStart="150dp"
+        android:layout_marginBottom="-12dp"
+        android:text="@string/chat" />
+
+</RelativeLayout>
