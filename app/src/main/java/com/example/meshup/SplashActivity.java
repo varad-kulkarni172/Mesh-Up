@@ -9,7 +9,7 @@ import android.widget.ImageView;
 
 public class SplashActivity extends AppCompatActivity {
 
-    private static final int SPLASH_DISPLAY_LENGTH = 2500; // 2000 milliseconds = 2 seconds
+    private static final int SPLASH_DISPLAY_LENGTH = 1500; // 2000 milliseconds = 2 seconds
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -20,7 +20,7 @@ public class SplashActivity extends AppCompatActivity {
         ImageView logoImageView = findViewById(R.id.logoImageView);
         Glide.with(this)
                 .asGif()
-                .load(R.drawable.sos) // Replace with your actual GIF file
+                .load(R.drawable.emergency) // Replace with your actual GIF file
                 .into(logoImageView);
 
         // Delay for 2000ms before transitioning to the next screen
