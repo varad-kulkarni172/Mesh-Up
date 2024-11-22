@@ -2,8 +2,13 @@ package com.example.meshup;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -30,8 +35,10 @@ import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,7 +51,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int MAX_HOP_COUNT = 5; // Prevent infinite routing
 
     private static final long ACKNOWLEDGMENT_TIMEOUT = 5000; // 5 seconds
-
+    private Map<String, Long> deviceLastSeenTime = new ConcurrentHashMap<>();
+    private static final long DEVICE_TIMEOUT = 60000; // 60 seconds
     private RecyclerView messageRecyclerView;
     private MessageAdapter messageAdapter;
     private TextView deviceCountText;
@@ -71,6 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private Set<String> connectedDevices = ConcurrentHashMap.newKeySet();
 
     private String localUsername = "Anonymous";
+    private NetworkChangeReceiver networkChangeReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -98,6 +107,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Prompt for username after initial setup
         promptForUserName();
+        networkChangeReceiver = new NetworkChangeReceiver();
+        IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
+        registerReceiver(networkChangeReceiver, filter);
     }
 
     private void initializeUIComponents() {
@@ -387,6 +399,58 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    private String getDeviceMacAddress() {
+        try {
+            List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+            for (NetworkInterface intf : interfaces) {
+                if (!intf.getName().equals("wlan0")) continue;
+                byte[] mac = intf.getHardwareAddress();
+                if (mac == null) return "Unknown";
+
+                StringBuilder buf = new StringBuilder();
+                for (byte aMac : mac) {
+                    buf.append(String.format("%02X:", aMac));
+                }
+                if (buf.length() > 0) {
+                    buf.deleteCharAt(buf.length() - 1);
+                }
+                return buf.toString();
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return "Unknown";
+    }
+
+    private class NetworkChangeReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+
+            if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
+                NetworkInfo networkInfo = intent.getParcelableExtra(ConnectivityManager.EXTRA_NETWORK_INFO);
+
+                if (networkInfo != null && networkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+                    boolean isConnected = networkInfo.isConnected();
+
+                    mainHandler.post(() -> {
+                        if (isConnected) {
+                            updateConnectionStatus();
+                            // Reinitialize network-dependent components
+                            startMessageReceiver();
+                        } else {
+                            statusText.setText("Network Status: Disconnected");
+                            // Clear connected devices
+                            connectedDevices.clear();
+                            deviceLastSeenTime.clear();
+                            updateDeviceCount();
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     private void processReceivedMessage(String receivedMessage, String senderIP) {
         String[] parts = receivedMessage.split("\\|");
         if (parts.length != 5) return;
@@ -405,6 +469,9 @@ public class MainActivity extends AppCompatActivity {
         if (seenMessageIds.contains(messageId)) {
             return; // Prevent duplicate processing
         }
+
+        // Update last seen time for the device
+        deviceLastSeenTime.put(originDeviceId, System.currentTimeMillis());
 
         // Add message to seen list
         seenMessageIds.add(messageId);
@@ -484,8 +551,15 @@ public class MainActivity extends AppCompatActivity {
             while (isReceiving) {
                 try {
                     Thread.sleep(30000); // Check every 30 seconds
-                    // Remove devices not seen in last 60 seconds
-                    // Implementation depends on how you want to track device activity
+
+                    long currentTime = System.currentTimeMillis();
+                    deviceLastSeenTime.entrySet().removeIf(entry ->
+                            currentTime - entry.getValue() > DEVICE_TIMEOUT
+                    );
+
+                    // Remove from connected devices
+                    connectedDevices.retainAll(deviceLastSeenTime.keySet());
+
                     updateDeviceCount();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -536,6 +610,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (networkChangeReceiver != null) {
+            unregisterReceiver(networkChangeReceiver);
+        }
         // Stop receiving messages
         isReceiving = false;
         // Shutdown executor service
