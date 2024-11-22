@@ -53,9 +53,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
 
         // Set message color based on delivery status
         int textColor = message.isDelivered() ?
-                ContextCompat.getColor(context, R.color.md_theme_scrim) :
+                ContextCompat.getColor(context, R.color.md_theme_primaryFixedDim) :
                 ContextCompat.getColor(context, R.color.md_theme_error);
-        holder.messageText.setTextColor(textColor);
+        holder.headerText.setTextColor(textColor);
 
         // Show MAC address on long press
         holder.itemView.setOnLongClickListener(v -> {

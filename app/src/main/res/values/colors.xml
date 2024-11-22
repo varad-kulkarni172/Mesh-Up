@@ -1,6 +1,10 @@
 <resources>
     <color name="undelivered_message_red">#FFCDD2</color>
     <color name="default_card_color">#FFFFFF</color>
+    <color name="success_background">#E8F5E9</color>
+    <color name="error_background">#FFEBEE</color>
+    <color name="text_primary">#000000</color>
+    <color name="text_error">#D32F2F</color>
 
     <color name="md_theme_primary">#415F91</color>
     <color name="md_theme_onPrimary">#FFFFFF</color>

@@ -29,8 +29,22 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_margin="8dp"
-        app:layout_constraintBottom_toTopOf="@id/messageInput"
+        app:layout_constraintBottom_toTopOf="@+id/sosButton"
         app:layout_constraintTop_toBottomOf="@id/statusText" />
+
+
+    <Button
+        android:id="@+id/sosButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_margin="16dp"
+        android:backgroundTint="@color/error_background"
+        android:text="Emergency SOS"
+        android:textColor="@color/text_error"
+        app:layout_constraintBottom_toTopOf="@+id/messageInput"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <EditText
         android:id="@+id/messageInput"

@@ -10,10 +10,14 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.location.Location;
+import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -23,6 +27,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -93,6 +99,8 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize UI elements BEFORE using them
         initializeUIComponents();
+        Button sosButton = findViewById(R.id.sosButton);
+        sosButton.setOnClickListener(v -> sendSOSMessage());
 
         // Setup execution and UI handling
         executorService = Executors.newCachedThreadPool();
@@ -100,6 +108,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Check and request necessary permissions
         checkPermissions();
+        requestLocationPermissions();
 
         // Setup UI interactions
         setupUI();
@@ -116,6 +125,60 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
         registerReceiver(networkChangeReceiver, filter);
     }
+    private int getBatteryPercentage() {
+        BatteryManager batteryManager = (BatteryManager) getSystemService(BATTERY_SERVICE);
+        return batteryManager != null
+                ? batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                : -1; // Return -1 if unavailable
+    }
+    private void requestLocationPermissions() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, PERMISSIONS_REQUEST_CODE);
+        }
+    }
+    private String getGPSCoordinates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            if (locationManager != null) {
+                Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                if (location != null) {
+                    return String.format("Lat: %s, Long: %s", location.getLatitude(), location.getLongitude());
+                }
+            }
+        }
+        return "Location Unavailable";
+    }
+
+    private void sendSOSMessage() {
+        String batteryPercentage = getBatteryPercentage() + "%";
+        String gpsCoordinates = getGPSCoordinates();
+
+        String deviceInfo = String.format(
+                "EMERGENCY SOS!\nDevice Info:\n- Manufacturer: %s\n- Model: %s\n- OS: %s\n- Battery: %s\n- Location: %s\n- IP: %s",
+                Build.MANUFACTURER,
+                Build.MODEL,
+                Build.VERSION.RELEASE,
+                batteryPercentage,
+                gpsCoordinates,
+                getLocalIpAddress()
+        );
+
+        broadcastMessage(deviceInfo);
+        Toast.makeText(this, "SOS message sent!", Toast.LENGTH_SHORT).show();
+    }
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permissions granted
+            } else {
+                Toast.makeText(this, "Location permission is required for SOS!", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+
 
     private void initializeUIComponents() {
         // Ensure ALL UI components are initialized
