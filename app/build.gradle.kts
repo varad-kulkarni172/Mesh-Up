@@ -40,6 +40,8 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 
+    implementation(libs.cardView)
+
     // Glide dependencies
     implementation(libs.glide)
     annotationProcessor(libs.glideCompiler) // for Glide annotation processing

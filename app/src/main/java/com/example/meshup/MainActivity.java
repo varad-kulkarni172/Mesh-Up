@@ -1,6 +1,7 @@
 package com.example.meshup;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.wifi.WifiInfo;
@@ -8,6 +9,8 @@ import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
+import android.util.Log;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -15,6 +18,8 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -38,8 +43,16 @@ public class MainActivity extends AppCompatActivity {
     private static final int BROADCAST_PORT = 8888;
     private static final int MAX_HOP_COUNT = 5; // Prevent infinite routing
 
+    private static final long ACKNOWLEDGMENT_TIMEOUT = 5000; // 5 seconds
+
+    private RecyclerView messageRecyclerView;
+    private MessageAdapter messageAdapter;
+    private TextView deviceCountText;
+    private String userName;
+    private String deviceMac;
+
     private EditText messageInput;
-    private TextView messageView;
+//    private TextView messageView;
     private Button sendButton;
     private TextView statusText;
 
@@ -54,16 +67,18 @@ public class MainActivity extends AppCompatActivity {
     // Unique device ID
     private final String DEVICE_ID = UUID.randomUUID().toString();
 
+    // Track connected devices
+    private Set<String> connectedDevices = ConcurrentHashMap.newKeySet();
+
+    private String localUsername = "Anonymous";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Initialize UI elements
-        messageInput = findViewById(R.id.messageInput);
-        messageView = findViewById(R.id.messageView);
-        sendButton = findViewById(R.id.sendButton);
-        statusText = findViewById(R.id.statusText);
+        // Initialize UI elements BEFORE using them
+        initializeUIComponents();
 
         // Setup execution and UI handling
         executorService = Executors.newCachedThreadPool();
@@ -80,6 +95,56 @@ public class MainActivity extends AppCompatActivity {
 
         // Update connection status
         updateConnectionStatus();
+
+        // Prompt for username after initial setup
+        promptForUserName();
+    }
+
+    private void initializeUIComponents() {
+        // Ensure ALL UI components are initialized
+        messageInput = findViewById(R.id.messageInput);
+//        messageView = findViewById(R.id.messageView); // Keep this if you still want it
+        sendButton = findViewById(R.id.sendButton);
+        statusText = findViewById(R.id.statusText);
+        deviceCountText = findViewById(R.id.deviceCountText);
+
+        // Initialize RecyclerView
+        messageRecyclerView = findViewById(R.id.messageRecyclerView);
+        messageAdapter = new MessageAdapter(this);
+        messageRecyclerView.setAdapter(messageAdapter);
+        messageRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+    }
+
+    private void setupUI() {
+        sendButton.setOnClickListener(v -> {
+            // Null and empty checks
+            if (messageInput == null) {
+                Log.e("MainActivity", "Message input is null");
+                return;
+            }
+
+            String message = messageInput.getText().toString().trim();
+            if (!message.isEmpty()) {
+                broadcastMessage(message);
+                messageInput.setText(""); // Clear input
+            }
+        });
+    }
+
+    private void promptForUserName() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        EditText input = new EditText(this);
+
+        builder.setTitle("Enter Your Name")
+                .setView(input)
+                .setCancelable(false)
+                .setPositiveButton("OK", (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    localUsername = TextUtils.isEmpty(name)
+                            ? "User-" + DEVICE_ID.substring(0, 8)
+                            : name;
+                })
+                .show();
     }
 
     private void checkPermissions() {
@@ -107,45 +172,81 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void setupUI() {
-        sendButton.setOnClickListener(v -> {
-            String message = messageInput.getText().toString();
-            if (!message.isEmpty()) {
-                broadcastMessage(message);
-                messageInput.setText("");
-            }
-        });
-    }
 
     private void updateConnectionStatus() {
-        WifiManager wifiManager = (WifiManager) getApplicationContext()
-                .getSystemService(Context.WIFI_SERVICE);
-        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-
-        String status = "Network Status: ";
-
         try {
-            // Get local IP address
-            String localIP = getLocalIpAddress();
-            status += (localIP != null ? "Connected (IP: " + localIP + ")" : "Not Connected");
-        } catch (Exception e) {
-            status += "Error detecting network";
-        }
+            WifiManager wifiManager = (WifiManager) getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
 
-        final String finalStatus = status;
-        mainHandler.post(() -> {
-            statusText.setText(finalStatus);
-        });
+            if (wifiManager == null || statusText == null) return;
+
+            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+
+            String status = "Network Status: ";
+            try {
+                String localIP = getLocalIpAddress();
+                status += (localIP != null ? "Connected (IP: " + localIP + ")" : "Not Connected");
+            } catch (Exception e) {
+                status += "Error detecting network";
+            }
+
+            final String finalStatus = status;
+            if (mainHandler != null) {
+                mainHandler.post(() -> {
+                    if (statusText != null) {
+                        statusText.setText(finalStatus);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "Failed to update connection status", e);
+        }
     }
 
     private void broadcastMessage(final String message) {
         executorService.execute(() -> {
             try {
-                // Create a unique message ID to prevent routing loops
-                String messageId = UUID.randomUUID().toString();
+                // Use local username or default
+                String senderName = TextUtils.isEmpty(localUsername)
+                        ? "User-" + DEVICE_ID.substring(0, 8)
+                        : localUsername;
 
-                // Construct mesh network message
+                // Get device MAC safely
+                String macAddress = "Unknown";
+                try {
+                    WifiManager wifiManager = (WifiManager) getApplicationContext()
+                            .getSystemService(Context.WIFI_SERVICE);
+                    if (wifiManager != null) {
+                        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                        macAddress = wifiInfo != null ? wifiInfo.getMacAddress() : "Unknown";
+                    }
+                } catch (Exception e) {
+                    Log.e("MainActivity", "Failed to get MAC address", e);
+                }
+
+                // Create message with safe values
+                String messageId = UUID.randomUUID().toString();
+                String localIP = getLocalIpAddress();
+                Message msgObj = new Message(
+                        senderName,
+                        macAddress,
+                        localIP != null ? localIP : "Unknown",
+                        message,
+                        messageId
+                );
+
+                // Safely update UI on main thread
+                if (mainHandler != null) {
+                    mainHandler.post(() -> {
+                        if (messageAdapter != null) {
+                            messageAdapter.addMessage(msgObj);
+                        }
+                    });
+                }
+
+                // Construct mesh message
                 String meshMessage = constructMeshMessage(messageId, message);
+                // Construct mesh message
 
                 // Create UDP broadcast socket
                 DatagramSocket socket = new DatagramSocket();
@@ -175,21 +276,26 @@ public class MainActivity extends AppCompatActivity {
 
                 socket.close();
 
-                // Update UI with sent message
-                mainHandler.post(() -> {
-                    String currentText = messageView.getText().toString();
-                    messageView.setText(currentText + "\nMe: " + message);
-                });
+                // Start acknowledgment timeout
+                scheduleAcknowledgmentTimeout(messageId);
 
             } catch (SocketException e) {
-                e.printStackTrace();
-                mainHandler.post(() -> {
-                    Toast.makeText(MainActivity.this,
-                            "Failed to broadcast message",
-                            Toast.LENGTH_SHORT).show();
+                Log.e("MainActivity", "Broadcast message failed", e);
+                // Safely show toast on main thread
+                if (mainHandler != null)
+                    mainHandler.post(() -> {
+                        Toast.makeText(MainActivity.this,
+                                "Failed to broadcast message",
+                                Toast.LENGTH_SHORT).show();
                 });
             }
         });
+    }
+
+    private void scheduleAcknowledgmentTimeout(String messageId) {
+        mainHandler.postDelayed(() -> {
+            messageAdapter.updateMessageDeliveryStatus(messageId, false);
+        }, ACKNOWLEDGMENT_TIMEOUT);
     }
 
     private List<InetAddress> getBroadcastAddresses() {
@@ -272,25 +378,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String constructMeshMessage(String messageId, String message) {
-        // Format: messageId|originDeviceId|hopCount|message
-        return String.format("%s|%s|0|%s",
+        // Format: messageId|originDeviceId|hopCount|senderUsername|message
+        return String.format("%s|%s|0|%s|%s",
                 messageId,
                 DEVICE_ID,
+                localUsername,  // Include actual username
                 message
         );
     }
 
     private void processReceivedMessage(String receivedMessage, String senderIP) {
-        // Split the mesh message
         String[] parts = receivedMessage.split("\\|");
-        if (parts.length != 4) {
-            return; // Malformed message
-        }
+        if (parts.length != 5) return;
 
         String messageId = parts[0];
         String originDeviceId = parts[1];
         int hopCount = Integer.parseInt(parts[2]);
-        String message = parts[3];
+        String senderUsername = parts[3];
+        String message = parts[4];
+
+        // Track connected device
+        connectedDevices.add(originDeviceId);
+        updateDeviceCount();
 
         // Check if we've already seen this message
         if (seenMessageIds.contains(messageId)) {
@@ -305,47 +414,102 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Update hop count and rebroadcast if not from this device
+        // If not from this device, process and potentially rebroadcast
         if (!originDeviceId.equals(DEVICE_ID)) {
-            // Rebroadcast the message with incremented hop count
-            String forwardMessage = String.format("%s|%s|%d|%s",
-                    messageId,
-                    originDeviceId,
-                    hopCount + 1,
-                    message
-            );
+            sendAcknowledgment(messageId, originDeviceId);
 
-            // Broadcast to all interfaces
+            // Display received message on UI thread
+            mainHandler.post(() -> {
+                Message msgObj = new Message(
+                        senderUsername,  // Use actual sender username
+                        "Unknown",
+                        senderIP,
+                        message,
+                        messageId
+                );
+                msgObj.setDelivered(true);
+                messageAdapter.addMessage(msgObj);
+            });
+
+            // Enhanced routing: Rebroadcast with incremented hop count
+            rebroadcastMessage(messageId, originDeviceId, hopCount, senderUsername, message);
+        }
+    }
+
+    private void rebroadcastMessage(String messageId, String originDeviceId, int hopCount, String senderUsername, String message) {
+        executorService.execute(() -> {
             try {
+                // Increment hop count
+                int newHopCount = hopCount + 1;
+                String forwardMessage = String.format("%s|%s|%d|%s|%s",
+                        messageId, originDeviceId, newHopCount, senderUsername, message);
+
+                // Create UDP broadcast socket
                 DatagramSocket socket = new DatagramSocket();
                 socket.setBroadcast(true);
 
+                // Prepare message data
+                byte[] sendData = forwardMessage.getBytes();
+
+                // Get network interface details
                 List<InetAddress> broadcastAddresses = getBroadcastAddresses();
 
+                // Send to all potential broadcast addresses
                 for (InetAddress broadcastAddress : broadcastAddresses) {
-                    byte[] sendData = forwardMessage.getBytes();
-                    DatagramPacket sendPacket = new DatagramPacket(
-                            sendData,
-                            sendData.length,
-                            broadcastAddress,
-                            BROADCAST_PORT
-                    );
+                    try {
+                        DatagramPacket sendPacket = new DatagramPacket(
+                                sendData,
+                                sendData.length,
+                                broadcastAddress,
+                                BROADCAST_PORT
+                        );
 
-                    socket.send(sendPacket);
+                        socket.send(sendPacket);
+                        Log.d("Mesh Network", "Rebroadcast sent to: " + broadcastAddress.getHostAddress());
+                    } catch (IOException e) {
+                        Log.e("Mesh Network", "Rebroadcast failed to " + broadcastAddress.getHostAddress(), e);
+                    }
                 }
 
                 socket.close();
-            } catch (IOException e) {
+            } catch (Exception e) {
+                Log.e("Mesh Network", "Rebroadcast error", e);
+            }
+        });
+    }
+
+    // Remove disconnected devices periodically
+    private void startDeviceCleanup() {
+        executorService.execute(() -> {
+            while (isReceiving) {
+                try {
+                    Thread.sleep(30000); // Check every 30 seconds
+                    // Remove devices not seen in last 60 seconds
+                    // Implementation depends on how you want to track device activity
+                    updateDeviceCount();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+    }
+    private void sendAcknowledgment(String messageId, String targetDeviceId) {
+        // Send UDP acknowledgment packet
+        executorService.execute(() -> {
+            try {
+                String ackMessage = "ACK|" + messageId + "|" + DEVICE_ID;
+                // ... (similar to broadcast code, but with ack message)
+            } catch (Exception e) {
                 e.printStackTrace();
             }
+        });
+    }
 
-            // Display the received message
-            mainHandler.post(() -> {
-                String currentText = messageView.getText().toString();
-                messageView.setText(currentText +
-                        "\n" + senderIP + " (Forwarded): " + message);
-            });
-        }
+    private void updateDeviceCount() {
+        mainHandler.post(() -> {
+            deviceCountText.setText("Devices: " + connectedDevices.size());
+        });
     }
 
 

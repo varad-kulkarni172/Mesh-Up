@@ -18,6 +18,7 @@ activity = { group = "androidx.activity", name = "activity", version.ref = "acti
 constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 glide = "com.github.bumptech.glide:glide:4.15.1"
 glideCompiler = "com.github.bumptech.glide:compiler:4.15.1"
+cardView = "androidx.cardview:cardview:1.0.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
