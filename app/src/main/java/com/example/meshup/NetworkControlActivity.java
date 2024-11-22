@@ -1,5 +1,7 @@
 package com.example.meshup;
 
+import android.app.ActivityManager;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,27 +34,41 @@ public class NetworkControlActivity extends AppCompatActivity {
 
     private void setupButtonListeners() {
         startNetworkButton.setOnClickListener(v -> {
-            // Start Messaging Service
-            Intent serviceIntent = new Intent(this, MainActivity.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
+            if (!isServiceRunning(MainActivity.class)) {
+                Intent serviceIntent = new Intent(this, MainActivity.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent);
+                } else {
+                    startService(serviceIntent);
+                }
+
+                // Launch Main Activity
+                Intent mainIntent = new Intent(this, MainActivity.class);
+                startActivity(mainIntent);
+
+                updateNetworkStatus(true);
             }
-
-            // Launch Main Activity
-            Intent mainIntent = new Intent(this, MainActivity.class);
-            startActivity(mainIntent);
-
-            updateNetworkStatus(true);
         });
 
         stopNetworkButton.setOnClickListener(v -> {
-            // Stop Messaging Service
-            Intent serviceIntent = new Intent(this, MainActivity.class);
-            stopService(serviceIntent);
-
-            updateNetworkStatus(false);
+            if (isServiceRunning(MainActivity.class)) {
+                Intent serviceIntent = new Intent(this, MainActivity.class);
+                stopService(serviceIntent);
+                updateNetworkStatus(false);
+            }
         });
     }
+
+    private boolean isServiceRunning(Class<?> serviceClass) {
+        ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (serviceClass.getName().equals(service.service.getClassName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 
     private void updateNetworkStatus(boolean isRunning) {
         if (isRunning) {
@@ -71,6 +87,8 @@ public class NetworkControlActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // You might want to check if service is running and update UI accordingly
+        // Check network or service status to update UI
+        updateNetworkStatus(isServiceRunning(MainActivity.class));
     }
+
 }

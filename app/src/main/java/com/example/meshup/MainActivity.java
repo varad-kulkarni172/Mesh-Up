@@ -1,11 +1,14 @@
 package com.example.meshup;
 
 import android.Manifest;
+import com.example.meshup.R;
+
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
@@ -25,6 +28,8 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -142,22 +147,46 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+    @Override
+    public void onBackPressed() {
+        // Redirect to NetworkControlActivity
+        super.onBackPressed();
+        Intent intent = new Intent(this, NetworkControlActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish(); // End MainActivity
+    }
+
 
     private void promptForUserName() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        EditText input = new EditText(this);
+        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+        localUsername = prefs.getString("username", null);
 
-        builder.setTitle("Enter Your Name")
-                .setView(input)
-                .setCancelable(false)
-                .setPositiveButton("OK", (dialog, which) -> {
-                    String name = input.getText().toString().trim();
-                    localUsername = TextUtils.isEmpty(name)
-                            ? "User-" + DEVICE_ID.substring(0, 8)
-                            : name;
-                })
-                .show();
+        if (localUsername == null) {
+            BottomSheetDialog dialog = new BottomSheetDialog(this);
+            dialog.setContentView(R.layout.dialog_username);
+
+            EditText usernameInput = dialog.findViewById(R.id.usernameInput);
+            Button saveButton = dialog.findViewById(R.id.saveButton);
+
+            saveButton.setOnClickListener(v -> {
+                String name = usernameInput.getText().toString().trim();
+                localUsername = TextUtils.isEmpty(name)
+                        ? "User-" + DEVICE_ID.substring(0, 8)
+                        : name;
+
+                // Save username
+                prefs.edit().putString("username", localUsername).apply();
+
+                dialog.dismiss();
+            });
+
+            dialog.setCancelable(false);
+            dialog.show();
+        }
     }
+
+
 
     private void checkPermissions() {
         String[] permissions = {

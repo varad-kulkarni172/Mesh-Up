@@ -1,4 +1,7 @@
 <resources>
+    <color name="undelivered_message_red">#FFCDD2</color>
+    <color name="default_card_color">#FFFFFF</color>
+
     <color name="md_theme_primary">#415F91</color>
     <color name="md_theme_onPrimary">#FFFFFF</color>
     <color name="md_theme_primaryContainer">#D6E3FF</color>
