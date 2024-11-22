@@ -7,6 +7,14 @@
     android:gravity="center">
 
     <TextView
+        android:id="@+id/textView"
+        android:layout_width="350dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="1. Turn on your Wifi and connect to available networks (preferably mesh.) \n\n2. If possible simulatneously, turn on your hotpost with open password\n\n"
+        android:textSize="20dp" />
+
+    <TextView
         android:id="@+id/networkStatusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
