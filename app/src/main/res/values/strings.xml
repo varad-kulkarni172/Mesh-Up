@@ -8,4 +8,8 @@
     <string name="chat">Chat</string>
     <string name="service_running">Service Running</string>
     <string name="service_suspended">Service Suspended</string>
+    <string-array name="network_types">
+        <item>Wi-Fi</item>
+        <item>Bluetooth</item>
+    </string-array>
 </resources>
