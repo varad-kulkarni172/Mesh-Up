@@ -136,17 +136,82 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, PERMISSIONS_REQUEST_CODE);
         }
     }
+//    private String getGPSCoordinates() {
+//        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+//            LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+//            if (locationManager != null) {
+//                Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+//                if (location != null) {
+//                    return String.format("Lat: %s, Long: %s", location.getLatitude(), location.getLongitude());
+//                }
+//            }
+//        }
+//        return "Location Unavailable";
+//    }
+
     private String getGPSCoordinates() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-            if (locationManager != null) {
-                Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                if (location != null) {
-                    return String.format("Lat: %s, Long: %s", location.getLatitude(), location.getLongitude());
-                }
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return "Location Permission Not Granted";
         }
-        return "Location Unavailable";
+
+        LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (locationManager == null) {
+            return "Location Service Not Available";
+        }
+
+        // Check if GPS is enabled
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            // Prompt user to enable GPS
+            new AlertDialog.Builder(this)
+                    .setMessage("GPS is disabled. Please enable it to get location coordinates.")
+                    .setPositiveButton("Open Settings", (dialogInterface, i) -> {
+                        startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return "GPS Disabled";
+        }
+
+        // Try multiple location providers in order of accuracy
+        Location location = null;
+
+        // Try GPS provider first
+        if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+        }
+
+        // If GPS failed, try NETWORK provider
+        if (location == null && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+        }
+
+        // If NETWORK failed, try PASSIVE provider
+        if (location == null && locationManager.isProviderEnabled(LocationManager.PASSIVE_PROVIDER)) {
+            location = locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
+        }
+
+        if (location != null) {
+            return String.format("Lat: %.6f, Long: %.6f", location.getLatitude(), location.getLongitude());
+        } else {
+            // If still no location, request location updates
+            try {
+                locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000, // minimum time interval between updates in milliseconds
+                        1,    // minimum distance between updates in meters
+                        location1 -> {
+                            String coordinates = String.format("Lat: %.6f, Long: %.6f",
+                                    location1.getLatitude(),
+                                    location1.getLongitude());
+                            // Update your UI or store the coordinates as needed
+                        },
+                        Looper.getMainLooper()
+                );
+            } catch (SecurityException e) {
+                Log.e("Location", "Error requesting location updates", e);
+            }
+            return "Acquiring Location...";
+        }
     }
 
     private void sendSOSMessage() {
