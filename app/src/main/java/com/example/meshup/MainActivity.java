@@ -1,11 +1,17 @@
 package com.example.meshup;
-
 import android.Manifest;
 import com.example.meshup.R;
 
+import android.database.Cursor;
+import android.provider.ContactsContract;
+import android.content.ContentResolver;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import java.util.ArrayList;
+import android.net.Uri;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.telephony.SmsManager;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -57,11 +63,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
+
+
     private static final int PERMISSIONS_REQUEST_CODE = 1001;
     private static final int BROADCAST_PORT = 8888;
     private static final int MAX_HOP_COUNT = 5; // Prevent infinite routing
 
-    private static final long ACKNOWLEDGMENT_TIMEOUT = 5000; // 5 seconds
+    private static final long ACKNOWLEDGMENT_TIMEOUT = 5000;
+
+    private static final int PICK_CONTACT_REQUEST = 1;
+    private static final int MAX_EMERGENCY_CONTACTS = 2;
+    private ArrayList<String> emergencyContacts;
+    private int currentContactPickerIndex = 0;; // 5 seconds
     private Map<String, Long> deviceLastSeenTime = new ConcurrentHashMap<>();
     private static final long DEVICE_TIMEOUT = 60000; // 60 seconds
     private RecyclerView messageRecyclerView;
@@ -71,7 +84,7 @@ public class MainActivity extends AppCompatActivity {
     private String deviceMac;
 
     private EditText messageInput;
-//    private TextView messageView;
+    //    private TextView messageView;
     private Button sendButton;
     private TextView statusText;
 
@@ -97,8 +110,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Initialize emergency contacts
+        emergencyContacts = new ArrayList<>();
+
         // Initialize UI elements BEFORE using them
         initializeUIComponents();
+        loadMessages();
+
+        checkAndSetupEmergencyContacts();
         Button sosButton = findViewById(R.id.sosButton);
         sosButton.setOnClickListener(v -> sendSOSMessage());
 
@@ -125,6 +144,86 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
         registerReceiver(networkChangeReceiver, filter);
     }
+
+    private void checkAndSetupEmergencyContacts() {
+        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+        String contact1 = prefs.getString("emergency_contact1", null);
+        String contact2 = prefs.getString("emergency_contact2", null);
+
+        if (contact1 == null || contact2 == null) {
+            showEmergencyContactsDialog();
+        } else {
+            emergencyContacts.clear();
+            emergencyContacts.add(contact1);
+            emergencyContacts.add(contact2);
+        }
+    }
+
+    private void showEmergencyContactsDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Emergency Contacts Setup")
+                .setMessage("Please select two emergency contacts from your phone book.")
+                .setPositiveButton("Select Contacts", (dialog, which) -> {
+                    // Check for contacts permission first
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        ActivityCompat.requestPermissions(this,
+                                new String[]{Manifest.permission.READ_CONTACTS},
+                                PERMISSIONS_REQUEST_CODE);
+                    } else {
+                        startContactPicker();
+                    }
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    private void startContactPicker() {
+        Intent intent = new Intent(Intent.ACTION_PICK);
+        intent.setType(ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE);
+        startActivityForResult(intent, PICK_CONTACT_REQUEST);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_CONTACT_REQUEST && resultCode == RESULT_OK) {
+            // Handle the contact picked
+            Uri contactUri = data.getData();
+            String[] projection = new String[]{ContactsContract.CommonDataKinds.Phone.NUMBER};
+
+            try (Cursor cursor = getContentResolver().query(contactUri, projection, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                    String phoneNumber = cursor.getString(numberIndex);
+
+                    // Save the contact
+                    saveEmergencyContact(phoneNumber, currentContactPickerIndex + 1);
+                    emergencyContacts.add(phoneNumber);
+
+                    // If we need another contact, start picker again
+                    if (currentContactPickerIndex < MAX_EMERGENCY_CONTACTS - 1) {
+                        currentContactPickerIndex++;
+                        startContactPicker();
+                    } else {
+                        // Reset index for next time
+                        currentContactPickerIndex = 0;
+                        Toast.makeText(this, "Emergency contacts saved successfully!",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        }
+    }
+
+    private void saveEmergencyContact(String phoneNumber, int contactIndex) {
+        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString("emergency_contact" + contactIndex, phoneNumber);
+        editor.apply();
+    }
+
+
     private int getBatteryPercentage() {
         BatteryManager batteryManager = (BatteryManager) getSystemService(BATTERY_SERVICE);
         return batteryManager != null
@@ -148,6 +247,39 @@ public class MainActivity extends AppCompatActivity {
 //        }
 //        return "Location Unavailable";
 //    }
+
+    private void saveMessage(String message) {
+        SharedPreferences prefs = getSharedPreferences("ChatHistory", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+
+        // Retrieve existing messages
+        String existingMessages = prefs.getString("messages", "");
+
+        // Append new message
+        existingMessages += message + "|||"; // Use "|||" as a separator to avoid confusion
+
+        // Save updated messages
+        editor.putString("messages", existingMessages);
+        editor.apply();
+    }
+
+    private void loadMessages() {
+        SharedPreferences prefs = getSharedPreferences("ChatHistory", MODE_PRIVATE);
+        String savedMessages = prefs.getString("messages", "");
+
+        Log.d("MainActivity", "Loaded messages: " + savedMessages); // Debugging log
+
+        if (!savedMessages.isEmpty()) {
+            String[] messages = savedMessages.split("\\|\\|\\|"); // Correctly split messages
+            for (String msg : messages) {
+                if (!msg.trim().isEmpty()) {
+                    Message msgObj = new Message("You", "Unknown", "Local", msg, UUID.randomUUID().toString());
+                    msgObj.setDelivered(true);
+                    messageAdapter.addMessage(msgObj);
+                }
+            }
+        }
+    }
 
     private String getGPSCoordinates() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -215,22 +347,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void sendSOSMessage() {
+
+        if (emergencyContacts.size() < 2) {
+            showEmergencyContactsDialog();
+            return;
+        }
+
         String batteryPercentage = getBatteryPercentage() + "%";
         String gpsCoordinates = getGPSCoordinates();
 
-        String deviceInfo = String.format(
-                "EMERGENCY SOS!\nDevice Info:\n- Manufacturer: %s\n- Model: %s\n- OS: %s\n- Battery: %s\n- Location: %s\n- IP: %s",
-                Build.MANUFACTURER,
-                Build.MODEL,
-                Build.VERSION.RELEASE,
-                batteryPercentage,
-                gpsCoordinates,
-                getLocalIpAddress()
+        // Predefined SOS message
+        String emergencyMessage = String.format(
+                "EMERGENCY SOS!\nDevice: %s %s\nBattery: %s\nLocation: %s",
+                Build.MANUFACTURER, Build.MODEL, batteryPercentage, gpsCoordinates
         );
 
-        broadcastMessage(deviceInfo);
-        Toast.makeText(this, "SOS message sent!", Toast.LENGTH_SHORT).show();
+        for (String contact : emergencyContacts) {
+            sendSMS(contact, emergencyMessage);
+        }
+
+        // Retrieve saved emergency contact from SharedPreferences
+        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+        String emergencyNumber = prefs.getString("emergency_contact", "+91100"); // Default: Police
+
+        // Send SMS to predefined contacts
+        sendSMS(emergencyNumber, emergencyMessage); // Primary emergency contact
+        sendSMS("+919503260577", emergencyMessage); // Personal emergency contact
+
+        // Also send via mesh network (existing functionality)
+        broadcastMessage(emergencyMessage);
+
+        Toast.makeText(this, "SOS sent via SMS & Mesh Network!", Toast.LENGTH_SHORT).show();
     }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -314,8 +463,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
-
     private void checkPermissions() {
         String[] permissions = {
                 Manifest.permission.ACCESS_WIFI_STATE,
@@ -323,13 +470,15 @@ public class MainActivity extends AppCompatActivity {
                 Manifest.permission.ACCESS_NETWORK_STATE,
                 Manifest.permission.INTERNET,
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.CHANGE_WIFI_MULTICAST_STATE
+                Manifest.permission.CHANGE_WIFI_MULTICAST_STATE,
+                Manifest.permission.SEND_SMS, // Add SMS permission
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.READ_CONTACTS
         };
 
         List<String> permissionsToRequest = new ArrayList<>();
         for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission)
-                    != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(permission);
             }
         }
@@ -340,6 +489,7 @@ public class MainActivity extends AppCompatActivity {
                     PERMISSIONS_REQUEST_CODE);
         }
     }
+
 
 
     private void updateConnectionStatus() {
@@ -373,6 +523,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void broadcastMessage(final String message) {
+        saveMessage(message);
         executorService.execute(() -> {
             try {
                 // Use local username or default
@@ -456,7 +607,7 @@ public class MainActivity extends AppCompatActivity {
                         Toast.makeText(MainActivity.this,
                                 "Failed to broadcast message",
                                 Toast.LENGTH_SHORT).show();
-                });
+                    });
             }
         });
     }
@@ -743,7 +894,22 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void sendSMS(String phoneNumber, String message) {
+        try {
+            SmsManager smsManager = SmsManager.getDefault();
+            smsManager.sendTextMessage(phoneNumber, null, message, null, null);
+            Log.d("SOS", "SMS sent to: " + phoneNumber);
+        } catch (Exception e) {
+            Log.e("SOS", "Failed to send SMS", e);
+        }
+    }
 
+    private void saveEmergencyContact(String phoneNumber) {
+        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString("emergency_contact", phoneNumber);
+        editor.apply();
+    }
     private String getLocalIpAddress() {
         try {
             for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces();
