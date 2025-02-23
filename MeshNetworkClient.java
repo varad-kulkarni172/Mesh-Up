@@ -1,23 +1,28 @@
 import javax.swing.*;
+import javax.swing.border.*;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 import java.awt.*;
 import java.io.IOException;
 import java.net.*;
-import java.util.ArrayList;
-import java.util.Enumeration;
+import java.util.*;
 import java.util.List;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MeshNetworkClient extends JFrame {
     private static final int BROADCAST_PORT = 8888;
     private static final int MAX_HOP_COUNT = 5;
-    private static final long ACKNOWLEDGMENT_TIMEOUT = 5000; // 5 seconds
-    private static final long DEVICE_CLEANUP_INTERVAL = 30000; // 30 seconds
+    private static final long ACKNOWLEDGMENT_TIMEOUT = 555000;
+    private static final long DEVICE_CLEANUP_INTERVAL = 30000;
+
+    // UI Colors
+    private static final Color DARK_BACKGROUND = new Color(30, 30, 30);
+    private static final Color DARKER_BACKGROUND = new Color(20, 20, 20);
+    private static final Color ACCENT_COLOR = new Color(86, 156, 214);
+    private static final Color TEXT_COLOR = new Color(220, 220, 220);
+    private static final Color INPUT_BACKGROUND = new Color(45, 45, 45);
+    private static final Color BUTTON_HOVER = new Color(106, 176, 234);
 
     private JTextArea messageArea;
     private JTextField messageInput;
@@ -29,29 +34,56 @@ public class MeshNetworkClient extends JFrame {
     private ScheduledExecutorService scheduledExecutor;
     private volatile boolean isReceiving = true;
 
-    // Track seen message IDs to prevent duplicates
     private Set<String> seenMessageIds = ConcurrentHashMap.newKeySet();
-
-    // Track connected devices
     private Set<String> connectedDevices = ConcurrentHashMap.newKeySet();
-
-    // Track message delivery status
     private ConcurrentHashMap<String, Boolean> messageDeliveryStatus = new ConcurrentHashMap<>();
 
-    // Unique device ID and username
     private final String DEVICE_ID = UUID.randomUUID().toString();
     private String localUsername = "Anonymous";
-
     private DatagramSocket receiveSocket;
 
     public MeshNetworkClient() {
         super("Mesh Network Client");
+        setDarkLookAndFeel();
         promptForUsername();
         initializeComponents();
         setupUI();
         startMessageReceiver();
         startDeviceCleanup();
     }
+
+    private void setDarkLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+
+            // General background and text color settings
+            UIManager.put("Panel.background", DARK_BACKGROUND);
+            UIManager.put("OptionPane.background", DARK_BACKGROUND);
+            UIManager.put("OptionPane.messageForeground", TEXT_COLOR);
+            UIManager.put("Label.foreground", TEXT_COLOR);
+            UIManager.put("TextField.background", INPUT_BACKGROUND);
+            UIManager.put("TextField.foreground", TEXT_COLOR);
+            UIManager.put("TextArea.background", INPUT_BACKGROUND);
+            UIManager.put("TextArea.foreground", TEXT_COLOR);
+            UIManager.put("Button.background", ACCENT_COLOR);
+            UIManager.put("Button.foreground", Color.WHITE);
+            UIManager.put("ScrollPane.background", DARK_BACKGROUND);
+            UIManager.put("Viewport.background", DARK_BACKGROUND);
+
+            // Force all components to be non-transparent
+            UIManager.put("Button.opaque", true);
+            UIManager.put("Panel.opaque", true);
+            UIManager.put("Label.opaque", true);
+            UIManager.put("TextField.opaque", true);
+            UIManager.put("TextArea.opaque", true);
+            UIManager.put("ScrollPane.opaque", true);
+            UIManager.put("Viewport.opaque", true);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 
     private void promptForUsername() {
         String input = JOptionPane.showInputDialog(
@@ -82,68 +114,155 @@ public class MeshNetworkClient extends JFrame {
         }
     }
 
-    private void setupUI() {
-        setLayout(new BorderLayout());
-        setSize(800, 600);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+    private JButton sosButton; // Declare SOS button
 
-        // Status panel at the top
-        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        statusLabel = new JLabel("Network Status: Initializing...");
-        deviceCountLabel = new JLabel("Devices: 0");
-        statusPanel.add(statusLabel);
-        statusPanel.add(Box.createHorizontalStrut(20));
-        statusPanel.add(deviceCountLabel);
+    private void setupUI() {
+        setLayout(new BorderLayout(10, 10));
+        setSize(900, 700);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        getContentPane().setBackground(DARK_BACKGROUND);
+
+        // Status Panel
+        JPanel statusPanel = createStatusPanel();
         add(statusPanel, BorderLayout.NORTH);
 
-        // Message display area
-        messageArea = new JTextArea();
-        messageArea.setEditable(false);
-        messageArea.setWrapStyleWord(true);
-        messageArea.setLineWrap(true);
-        messageArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        JScrollPane scrollPane = new JScrollPane(messageArea);
-        add(scrollPane, BorderLayout.CENTER);
+        // Message Area
+        JPanel messagePanel = createMessagePanel();
+        add(messagePanel, BorderLayout.CENTER);
 
-        // Input panel
-        JPanel inputPanel = new JPanel(new BorderLayout());
-        messageInput = new JTextField();
-        sendButton = new JButton("Send");
-        inputPanel.add(messageInput, BorderLayout.CENTER);
-        inputPanel.add(sendButton, BorderLayout.EAST);
+        // Input Panel
+        JPanel inputPanel = createInputPanel();
         add(inputPanel, BorderLayout.SOUTH);
+
+        // Add padding around the main content
+        ((JPanel) getContentPane()).setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
         // Action listeners
         sendButton.addActionListener(e -> sendMessage());
         messageInput.addActionListener(e -> sendMessage());
 
+        // SOS Button Setup
+        sosButton = createStyledButton("SOS", Color.RED);
+        inputPanel.add(sosButton, BorderLayout.WEST);
+        sosButton.setBackground(Color.RED);
+        sosButton.addActionListener(e -> sendSOSMessage());
+        inputPanel.add(sosButton, BorderLayout.WEST); // Add to input panel
+
         // Update status
         updateConnectionStatus();
+    }
+
+    private void sendSOSMessage() {
+        String batteryPercentage = getBatteryPercentage() + "%";
+        String gpsCoordinates = getGPSCoordinates();
+        String ipAddress = getLocalIpAddress() != null ? getLocalIpAddress() : "Unknown";
+
+        String sosMessage = String.format(
+                "🚨 EMERGENCY SOS 🚨\nDevice Info:\n- Manufacturer: %s\n- Model: %s\n- OS: %s\n- Battery: %s\n- Location: %s\n- IP: %s",
+                System.getProperty("os.name"),
+                System.getProperty("os.arch"),
+                System.getProperty("os.version"),
+                batteryPercentage,
+                gpsCoordinates,
+                ipAddress
+        );
+
+        broadcastMessage(sosMessage);
+        JOptionPane.showMessageDialog(this, "SOS message sent!", "SOS", JOptionPane.WARNING_MESSAGE);
+    }
+
+    private int getBatteryPercentage() {
+        return (int) (Math.random() * 100); // Placeholder since Java cannot get battery info directly
+    }
+
+    private String getGPSCoordinates() {
+        return "GPS Unavailable (Java Desktop)"; // Placeholder since Java Swing cannot access GPS
+    }
+
+
+    private JPanel createStatusPanel() {
+        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 10));
+        statusPanel.setBackground(DARKER_BACKGROUND);
+        statusPanel.setBorder(createRoundedBorder());
+
+        statusLabel = new JLabel("Network Status: Initializing...");
+        deviceCountLabel = new JLabel("Devices: 0");
+
+        styleLabel(statusLabel);
+        styleLabel(deviceCountLabel);
+
+        statusPanel.add(statusLabel);
+        statusPanel.add(new JSeparator(JSeparator.VERTICAL));
+        statusPanel.add(deviceCountLabel);
+
+        return statusPanel;
+    }
+
+    private JPanel createMessagePanel() {
+        JPanel messagePanel = new JPanel(new BorderLayout());
+        messagePanel.setBackground(DARK_BACKGROUND);
+
+        messageArea = new JTextArea();
+        messageArea.setFont(new Font("JetBrains Mono", Font.PLAIN, 13));
+        messageArea.setBackground(INPUT_BACKGROUND);
+        messageArea.setForeground(TEXT_COLOR);
+        messageArea.setLineWrap(true);
+        messageArea.setWrapStyleWord(true);
+        messageArea.setMargin(new Insets(10, 10, 10, 10));
+        messageArea.setEditable(false);
+
+        JScrollPane scrollPane = new JScrollPane(messageArea);
+        scrollPane.setBorder(createRoundedBorder());
+        scrollPane.getVerticalScrollBar().setUI(new CustomScrollBarUI());
+
+        messagePanel.add(scrollPane, BorderLayout.CENTER);
+        return messagePanel;
+    }
+
+    private JPanel createInputPanel() {
+        JPanel inputPanel = new JPanel(new BorderLayout(10, 0));
+        inputPanel.setBackground(DARK_BACKGROUND);
+        inputPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+
+        messageInput = new JTextField();
+        messageInput.setBackground(INPUT_BACKGROUND);
+        messageInput.setForeground(TEXT_COLOR);
+        messageInput.setCaretColor(TEXT_COLOR);
+        messageInput.setBorder(createRoundedBorder());
+        messageInput.setFont(new Font("JetBrains Mono", Font.PLAIN, 13));
+
+        sendButton = createStyledButton("Send", ACCENT_COLOR);
+
+        inputPanel.add(messageInput, BorderLayout.CENTER);
+        inputPanel.add(sendButton, BorderLayout.EAST);
+
+        return inputPanel;
+    }
+
+    private void sendMessage() {
+        String message = messageInput.getText().trim();
+        if (!message.isEmpty()) {
+            broadcastMessage(message);
+            messageInput.setText("");
+        }
     }
 
     private void broadcastMessage(final String message) {
         executorService.execute(() -> {
             try {
                 String messageId = UUID.randomUUID().toString();
-
-                // Add to delivery tracking
                 messageDeliveryStatus.put(messageId, false);
-
-                // Construct mesh message
                 String meshMessage = constructMeshMessage(messageId, message);
 
-                // Update UI immediately for sent message
                 SwingUtilities.invokeLater(() -> {
                     messageArea.append(String.format("\n[%s] Me: %s\n",
                             localUsername, message));
                     scrollToBottom();
                 });
 
-                // Create UDP broadcast socket
                 DatagramSocket socket = new DatagramSocket();
                 socket.setBroadcast(true);
 
-                // Broadcast to all interfaces
                 byte[] sendData = meshMessage.getBytes();
                 for (InetAddress broadcastAddress : getBroadcastAddresses()) {
                     try {
@@ -160,8 +279,6 @@ public class MeshNetworkClient extends JFrame {
                 }
 
                 socket.close();
-
-                // Schedule acknowledgment timeout
                 scheduleAcknowledgmentTimeout(messageId);
 
             } catch (SocketException e) {
@@ -174,22 +291,12 @@ public class MeshNetworkClient extends JFrame {
                 });
             }
         });
-    }
-
-    private void scheduleAcknowledgmentTimeout(String messageId) {
-        scheduledExecutor.schedule(() -> {
-            Boolean delivered = messageDeliveryStatus.get(messageId);
-            if (delivered == null || !delivered) {
-                SwingUtilities.invokeLater(() -> {
-                    messageArea.append("Message delivery timeout: " + messageId + "\n");
-                    scrollToBottom();
-                });
-            }
-        }, ACKNOWLEDGMENT_TIMEOUT, TimeUnit.MILLISECONDS);
+        String messageId = UUID.randomUUID().toString();
+        messageDeliveryStatus.put(messageId, false);
+        String meshMessage = constructMeshMessage(messageId, message);
     }
 
     private String constructMeshMessage(String messageId, String message) {
-        // Format: messageId|originDeviceId|hopCount|senderUsername|message
         return String.format("%s|%s|0|%s|%s",
                 messageId,
                 DEVICE_ID,
@@ -200,13 +307,6 @@ public class MeshNetworkClient extends JFrame {
 
     private void processReceivedMessage(String receivedMessage, String senderIP) {
         String[] parts = receivedMessage.split("\\|");
-        if (parts.length != 5) {
-            if (parts.length == 2 && parts[0].equals("ACK")) {
-                handleAcknowledgment(parts[1]);
-                return;
-            }
-            return; // Malformed message
-        }
 
         String messageId = parts[0];
         String originDeviceId = parts[1];
@@ -214,35 +314,40 @@ public class MeshNetworkClient extends JFrame {
         String senderUsername = parts[3];
         String message = parts[4];
 
-        // Track connected device
         connectedDevices.add(originDeviceId);
         updateDeviceCount();
 
-        // Check for duplicates
         if (seenMessageIds.contains(messageId)) {
             return;
         }
 
         seenMessageIds.add(messageId);
 
-        // Check hop count
         if (hopCount >= MAX_HOP_COUNT) {
             return;
         }
 
-        // Process message if not from this device
         if (!originDeviceId.equals(DEVICE_ID)) {
-            // Send acknowledgment
             sendAcknowledgment(messageId, originDeviceId);
 
-            // Display received message
             SwingUtilities.invokeLater(() -> {
                 messageArea.append(String.format("\n[%s] %s: %s\n",
                         senderUsername, senderIP, message));
                 scrollToBottom();
             });
 
-            // Rebroadcast message
+            if (!originDeviceId.equals(DEVICE_ID)) {
+                sendAcknowledgment(messageId, originDeviceId);
+
+                SwingUtilities.invokeLater(() -> {
+                    messageArea.append(String.format("\n[%s] %s: %s\n",
+                            senderUsername, senderIP, message));
+                    scrollToBottom();
+                });
+
+                rebroadcastMessage(messageId, originDeviceId, hopCount, senderUsername, message);
+            }
+
             rebroadcastMessage(messageId, originDeviceId, hopCount, senderUsername, message);
         }
     }
@@ -271,13 +376,7 @@ public class MeshNetworkClient extends JFrame {
         });
     }
 
-    private void handleAcknowledgment(String messageId) {
-        messageDeliveryStatus.put(messageId, true);
-        SwingUtilities.invokeLater(() -> {
-            messageArea.append("Message delivered: " + messageId + "\n");
-            scrollToBottom();
-        });
-    }
+
 
     private void rebroadcastMessage(String messageId, String originDeviceId,
                                     int hopCount, String senderUsername, String message) {
@@ -307,34 +406,16 @@ public class MeshNetworkClient extends JFrame {
         });
     }
 
-    private void startDeviceCleanup() {
-        scheduledExecutor.scheduleAtFixedRate(() -> {
-            // Clear old devices (implementation depends on how you want to track device activity)
-            updateDeviceCount();
-        }, DEVICE_CLEANUP_INTERVAL, DEVICE_CLEANUP_INTERVAL, TimeUnit.MILLISECONDS);
-    }
-
-    private void updateDeviceCount() {
-        SwingUtilities.invokeLater(() -> {
-            deviceCountLabel.setText("Devices: " + connectedDevices.size());
-        });
-    }
-
-    // Helper methods from original implementation remain the same:
-    // - sendMessage()
-    // - getBroadcastAddresses()
-    // - startMessageReceiver()
-    // - scrollToBottom()
-    // - getLocalIpAddress()
-    // - cleanup()
-    // - main()
-
-    private void sendMessage() {
-        String message = messageInput.getText().trim();
-        if (!message.isEmpty()) {
-            broadcastMessage(message);
-            messageInput.setText("");
-        }
+    private void scheduleAcknowledgmentTimeout(String messageId) {
+        scheduledExecutor.schedule(() -> {
+            Boolean delivered = messageDeliveryStatus.get(messageId);
+            if (delivered == null || !delivered) {
+                SwingUtilities.invokeLater(() -> {
+                    messageArea.append("Message delivery timeout: " + messageId + "\n");
+                    scrollToBottom();
+                });
+            }
+        }, ACKNOWLEDGMENT_TIMEOUT, TimeUnit.MILLISECONDS);
     }
 
     private void startMessageReceiver() {
@@ -370,6 +451,12 @@ public class MeshNetworkClient extends JFrame {
         });
     }
 
+    private void startDeviceCleanup() {
+        scheduledExecutor.scheduleAtFixedRate(() -> {
+            updateDeviceCount();
+        }, DEVICE_CLEANUP_INTERVAL, DEVICE_CLEANUP_INTERVAL, TimeUnit.MILLISECONDS);
+    }
+
     private void updateConnectionStatus() {
         try {
             String localIP = getLocalIpAddress();
@@ -379,6 +466,12 @@ public class MeshNetworkClient extends JFrame {
         } catch (Exception e) {
             statusLabel.setText("Network Status: Error detecting network");
         }
+    }
+
+    private void updateDeviceCount() {
+        SwingUtilities.invokeLater(() -> {
+            deviceCountLabel.setText("Devices: " + connectedDevices.size());
+        });
     }
 
     private List<InetAddress> getBroadcastAddresses() {
@@ -434,6 +527,41 @@ public class MeshNetworkClient extends JFrame {
         return null;
     }
 
+    private JButton createStyledButton(String text, Color bgColor) {
+        JButton button = new JButton(text);
+        button.setOpaque(true); // Ensure background is applied
+        button.setContentAreaFilled(true);
+        button.setBorderPainted(false);
+        button.setBackground(bgColor); // Set the background color dynamically
+        button.setForeground(Color.WHITE);
+        button.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        button.setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                button.setBackground(bgColor.darker()); // Darker color on hover
+            }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                button.setBackground(bgColor);
+            }
+        });
+
+        return button;
+    }
+
+
+    private void styleLabel(JLabel label) {
+        label.setForeground(TEXT_COLOR);
+        label.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+    }
+
+    private Border createRoundedBorder() {
+        return BorderFactory.createCompoundBorder(
+                new RoundedBorder(8),
+                BorderFactory.createEmptyBorder(5, 10, 5, 10)
+        );
+    }
+
     private void scrollToBottom() {
         messageArea.setCaretPosition(messageArea.getDocument().getLength());
     }
@@ -450,15 +578,62 @@ public class MeshNetworkClient extends JFrame {
             scheduledExecutor.shutdownNow();
         }
     }
-    public static void main(String[] args) {
-        try {
-            // Set system look and feel
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            System.err.println("Could not set system look and feel: " + e.getMessage());
+
+    // Custom rounded border class
+    private static class RoundedBorder extends AbstractBorder {
+        private final int radius;
+
+        RoundedBorder(int radius) {
+            this.radius = radius;
         }
 
+        @Override
+        public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(ACCENT_COLOR);
+            g2.drawRoundRect(x, y, width - 1, height - 1, radius, radius);
+            g2.dispose();
+        }
+
+        @Override
+        public Insets getBorderInsets(Component c) {
+            return new Insets(4, 8, 4, 8);
+        }
+    }
+
+    // Custom ScrollBar UI
+    private static class CustomScrollBarUI extends BasicScrollBarUI {
+        @Override
+        protected void configureScrollBarColors() {
+            thumbColor = ACCENT_COLOR;
+            trackColor = INPUT_BACKGROUND;
+        }
+
+        @Override
+        protected JButton createDecreaseButton(int orientation) {
+            return createZeroButton();
+        }
+
+        @Override
+        protected JButton createIncreaseButton(int orientation) {
+            return createZeroButton();
+        }
+
+        private JButton createZeroButton() {
+            JButton button = new JButton();
+            button.setPreferredSize(new Dimension(0, 0));
+            return button;
+        }
+    }
+
+    public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
+            try {
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             MeshNetworkClient client = new MeshNetworkClient();
             client.setLocationRelativeTo(null);
             client.setVisible(true);
